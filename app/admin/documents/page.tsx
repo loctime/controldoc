@@ -34,22 +34,52 @@ export default function AdminDocumentsPage() {
   const [previewDocument, setPreviewDocument] = useState<RequiredDocument | null>(null)
 
   useEffect(() => {
-    // Load documents from localStorage
-    const loadDocuments = () => {
+    // Cargar documentos desde Firestore
+    const loadDocuments = async () => {
+      if (!selectedCompanyId) {
+        setDocuments([])
+        setLoading(false)
+        return
+      }
+      
       try {
-        const allDocuments = JSON.parse(localStorage.getItem("documents") || "[]")
-        if (selectedCompanyId) {
-          return allDocuments.filter((doc: RequiredDocument) => doc.companyId === selectedCompanyId)
-        }
-        return []
+        setLoading(true)
+        
+        // Importar las funciones de Firebase
+        const { db } = await import('@/app/firebaseConfig')
+        const { collection, query, where, getDocs } = await import('firebase/firestore')
+        
+        // Consultar documentos de Firestore filtrados por companyId
+        const requiredDocsRef = collection(db, "requiredDocuments")
+        const q = query(requiredDocsRef, where("companyId", "==", selectedCompanyId))
+        const querySnapshot = await getDocs(q)
+        
+        // Convertir los documentos de Firestore al formato RequiredDocument
+        const docs = querySnapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data(),
+        })) as RequiredDocument[]
+        
+        setDocuments(docs)
       } catch (error) {
-        console.error("Error loading documents:", error)
-        return []
+        console.error("Error loading documents from Firestore:", error)
+        
+        // Fallback a localStorage si hay un error
+        try {
+          const allDocuments = JSON.parse(localStorage.getItem("documents") || "[]")
+          if (selectedCompanyId) {
+            setDocuments(allDocuments.filter((doc: RequiredDocument) => doc.companyId === selectedCompanyId))
+          }
+        } catch (localError) {
+          console.error("Error loading from localStorage:", localError)
+          setDocuments([])
+        }
+      } finally {
+        setLoading(false)
       }
     }
 
-    setDocuments(loadDocuments())
-    setLoading(false)
+    loadDocuments()
   }, [selectedCompanyId])
 
   function formatDeadline(document: RequiredDocument) {

@@ -32,10 +32,10 @@ export function MainNav({ role }: MainNavProps) {
   const links = role === "admin" ? adminLinks : employeeLinks
 
   return (
-    <div className="flex h-16 items-center px-4 border-b bg-card">
+    <>
       <div className="flex items-center space-x-4">
         <Link href="/" className="font-bold text-xl">
-          DocControl
+          Control de documentos
         </Link>
       </div>
       <nav className="mx-6 flex items-center space-x-4 lg:space-x-6">
@@ -66,6 +66,6 @@ export function MainNav({ role }: MainNavProps) {
           Logout
         </Link>
       </div>
-    </div>
+    </>
   )
 }

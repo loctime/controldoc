@@ -9,113 +9,242 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import type { UploadedFile } from "@/types"
 import { Download, Search } from "lucide-react"
-import { useState } from "react"
+import { useEffect, useState } from "react"
+import { toast } from "@/components/ui/use-toast"
 
-// Mock data - in a real app, this would come from your database
-const mockFiles: UploadedFile[] = [
-  {
-    id: "1",
-    userId: "user1",
-    companyId: "company1",
-    documentId: "doc1",
-    status: "pending",
-    fileUrl: "/files/document1.pdf",
-    fileName: "ID Card - John Doe",
-    fileType: "application/pdf",
-    fileSize: 1024 * 1024 * 2, // 2MB
-    uploadedAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 2), // 2 days ago
-    downloaded: false,
-    archived: false,
-    versions: [
-      {
-        url: "/files/document1.pdf",
-        uploadedAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 2),
-        fileType: "application/pdf",
-      },
-    ],
-  },
-  {
-    id: "2",
-    userId: "user2",
-    companyId: "company1",
-    documentId: "doc2",
-    status: "approved",
-    fileUrl: "/files/document2.pdf",
-    fileName: "Tax Form - Jane Smith",
-    fileType: "application/pdf",
-    fileSize: 1024 * 1024 * 1.5, // 1.5MB
-    uploadedAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 5), // 5 days ago
-    reviewedAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 4), // 4 days ago
-    reviewedBy: "admin1",
-    pdfUrl: "/files/document2.pdf",
-    downloaded: true,
-    downloadedAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 3), // 3 days ago
-    archived: false,
-    versions: [
-      {
-        url: "/files/document2.pdf",
-        uploadedAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 5),
-        fileType: "application/pdf",
-      },
-    ],
-  },
-  {
-    id: "3",
-    userId: "user3",
-    companyId: "company2",
-    documentId: "doc3",
-    status: "rejected",
-    fileUrl: "/files/document3.jpg",
-    fileName: "Contract - Bob Johnson",
-    fileType: "image/jpeg",
-    fileSize: 1024 * 1024 * 3, // 3MB
-    uploadedAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 7), // 7 days ago
-    reviewedAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 6), // 6 days ago
-    reviewedBy: "admin1",
-    adminNotes: "The document is blurry and unreadable. Please upload a clearer version.",
-    downloaded: false,
-    archived: false,
-    versions: [
-      {
-        url: "/files/document3.jpg",
-        uploadedAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 7),
-        fileType: "image/jpeg",
-      },
-    ],
-  },
-]
+// Definir el tipo de documento subido
+interface UploadedDocument {
+  id: string
+  userId: string
+  userName: string
+  companyId: string
+  requiredDocumentId: string
+  requiredDocumentName: string
+  status: "pending" | "approved" | "rejected"
+  fileUrl: string
+  fileName: string
+  fileType: string
+  fileSize: number
+  uploadedAt: string
+  notes?: string
+  approvedAt?: string
+  expirationDate?: string
+  rejectedAt?: string
+  rejectionComments?: string
+  reviewedBy?: string
+  archived?: boolean
+}
 
 export default function AdminUploadsPage() {
   const [searchTerm, setSearchTerm] = useState("")
   const [companyFilter, setCompanyFilter] = useState<string | null>(null)
+  const [isLoading, setIsLoading] = useState(true)
+  const [companies, setCompanies] = useState<{id: string, name: string}[]>([])
+  const [uploadedDocuments, setUploadedDocuments] = useState<UploadedDocument[]>([])
+  const [currentUser, setCurrentUser] = useState<any>(null)
 
-  // In a real app, these would be fetched from your database
-  const companies = [
-    { id: "company1", name: "Acme Inc." },
-    { id: "company2", name: "Globex Corporation" },
-  ]
+  // Cargar el usuario actual y los documentos subidos
+  useEffect(() => {
+    const loadUserAndData = async () => {
+      try {
+        // 1. Cargar el usuario actual
+        const storedUser = typeof window !== 'undefined' ? localStorage.getItem("currentUser") : null;
+        let user = null;
+        if (storedUser) {
+          user = JSON.parse(storedUser);
+          setCurrentUser(user);
+        }
 
-  const pendingFiles = mockFiles.filter((file) => file.status === "pending")
-  const approvedFiles = mockFiles.filter((file) => file.status === "approved" && !file.archived)
-  const rejectedFiles = mockFiles.filter((file) => file.status === "rejected")
-  const archivedFiles = mockFiles.filter((file) => file.archived)
+        // 2. Importar las funciones de Firebase
+        const { db } = await import('@/app/firebaseConfig');
+        const { collection, getDocs, query, where, orderBy } = await import('firebase/firestore');
+
+        // 3. Cargar las empresas
+        const companiesRef = collection(db, "companies");
+        const companiesSnapshot = await getDocs(companiesRef);
+        const companiesData = companiesSnapshot.docs.map(doc => ({
+          id: doc.id,
+          name: doc.data().name
+        }));
+        setCompanies(companiesData);
+
+        // 4. Cargar todos los documentos subidos
+        const uploadsRef = collection(db, "userUploads");
+        const uploadsQuery = query(uploadsRef, orderBy("uploadedAt", "desc"));
+        const uploadsSnapshot = await getDocs(uploadsQuery);
+        const uploadsData = uploadsSnapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        })) as UploadedDocument[];
+        setUploadedDocuments(uploadsData);
+
+      } catch (error) {
+        console.error("Error cargando datos:", error);
+        toast({
+          title: "Error",
+          description: "No se pudieron cargar los documentos. Por favor, intenta de nuevo.",
+          variant: "destructive",
+        });
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    loadUserAndData();
+  }, []);
+
+  // Filtrar documentos por estado
+  const pendingFiles = uploadedDocuments.filter((file) => 
+    file.status === "pending" && 
+    (!companyFilter || file.companyId === companyFilter) &&
+    (searchTerm === "" || 
+     file.fileName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+     file.requiredDocumentName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+     file.userName.toLowerCase().includes(searchTerm.toLowerCase()))
+  )
+  
+  const approvedFiles = uploadedDocuments.filter((file) => 
+    file.status === "approved" && 
+    !file.archived &&
+    (!companyFilter || file.companyId === companyFilter) &&
+    (searchTerm === "" || 
+     file.fileName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+     file.requiredDocumentName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+     file.userName.toLowerCase().includes(searchTerm.toLowerCase()))
+  )
+  
+  const rejectedFiles = uploadedDocuments.filter((file) => 
+    file.status === "rejected" &&
+    (!companyFilter || file.companyId === companyFilter) &&
+    (searchTerm === "" || 
+     file.fileName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+     file.requiredDocumentName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+     file.userName.toLowerCase().includes(searchTerm.toLowerCase()))
+  )
+  
+  const archivedFiles = uploadedDocuments.filter((file) => 
+    file.archived &&
+    (!companyFilter || file.companyId === companyFilter) &&
+    (searchTerm === "" || 
+     file.fileName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+     file.requiredDocumentName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+     file.userName.toLowerCase().includes(searchTerm.toLowerCase()))
+  )
 
   async function handleApprove(fileId: string) {
-    // In a real app, this would call your API to approve the document
-    console.log("Approving file:", fileId)
-    await new Promise((resolve) => setTimeout(resolve, 1000))
+    try {
+      // Mostrar un diálogo para establecer la fecha de vencimiento
+      const expirationDate = prompt("Ingrese la fecha de vencimiento (YYYY-MM-DD):");
+      if (!expirationDate) return;
+      
+      // Validar el formato de la fecha
+      const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+      if (!dateRegex.test(expirationDate)) {
+        toast({
+          title: "Formato de fecha inválido",
+          description: "Por favor, ingrese la fecha en formato YYYY-MM-DD",
+          variant: "destructive",
+        });
+        return;
+      }
+      
+      // Importar la función de Firebase
+      const { updateDocumentStatus } = await import('@/app/firebaseConfig');
+      
+      // Actualizar el estado del documento
+      await updateDocumentStatus(fileId, "approved", expirationDate);
+      
+      // Actualizar la lista de documentos
+      const updatedDocs = uploadedDocuments.map(doc => {
+        if (doc.id === fileId) {
+          return {
+            ...doc,
+            status: "approved",
+            approvedAt: new Date().toISOString(),
+            expirationDate,
+            reviewedBy: currentUser?.id
+          };
+        }
+        return doc;
+      });
+      
+      setUploadedDocuments(updatedDocs);
+      
+      toast({
+        title: "Documento aprobado",
+        description: `El documento ha sido aprobado con fecha de vencimiento: ${expirationDate}`,
+      });
+    } catch (error) {
+      console.error("Error al aprobar el documento:", error);
+      toast({
+        title: "Error",
+        description: "No se pudo aprobar el documento. Por favor, intenta de nuevo.",
+        variant: "destructive",
+      });
+    }
   }
 
-  async function handleReject(fileId: string, notes: string) {
-    // In a real app, this would call your API to reject the document
-    console.log("Rejecting file:", fileId, "with notes:", notes)
-    await new Promise((resolve) => setTimeout(resolve, 1000))
+  async function handleReject(fileId: string, comments: string) {
+    try {
+      // Importar la función de Firebase
+      const { updateDocumentStatus } = await import('@/app/firebaseConfig');
+      
+      // Actualizar el estado del documento
+      await updateDocumentStatus(fileId, "rejected", null, comments);
+      
+      // Actualizar la lista de documentos
+      const updatedDocs = uploadedDocuments.map(doc => {
+        if (doc.id === fileId) {
+          return {
+            ...doc,
+            status: "rejected",
+            rejectedAt: new Date().toISOString(),
+            rejectionComments: comments,
+            reviewedBy: currentUser?.id
+          };
+        }
+        return doc;
+      });
+      
+      setUploadedDocuments(updatedDocs);
+      
+      toast({
+        title: "Documento rechazado",
+        description: "El documento ha sido rechazado con los comentarios proporcionados.",
+      });
+    } catch (error) {
+      console.error("Error al rechazar el documento:", error);
+      toast({
+        title: "Error",
+        description: "No se pudo rechazar el documento. Por favor, intenta de nuevo.",
+        variant: "destructive",
+      });
+    }
   }
 
   async function handleDownload(fileId: string) {
-    // In a real app, this would download the file
-    console.log("Downloading file:", fileId)
-    await new Promise((resolve) => setTimeout(resolve, 1000))
+    try {
+      // Buscar el documento en la lista
+      const document = uploadedDocuments.find(doc => doc.id === fileId);
+      if (!document) {
+        throw new Error("Documento no encontrado");
+      }
+      
+      // Abrir la URL del archivo en una nueva pestaña
+      window.open(document.fileUrl, "_blank");
+      
+      toast({
+        title: "Descarga iniciada",
+        description: "El documento se está descargando.",
+      });
+    } catch (error) {
+      console.error("Error al descargar el documento:", error);
+      toast({
+        title: "Error",
+        description: "No se pudo descargar el documento. Por favor, intenta de nuevo.",
+        variant: "destructive",
+      });
+    }
   }
 
   async function handleDownloadAll() {

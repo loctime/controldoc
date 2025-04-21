@@ -85,25 +85,49 @@ export default function EmployeeDashboard() {
   useEffect(() => {
     if (!selectedCompanyId) return;
     
-    const loadRequiredDocuments = () => {
+    const loadRequiredDocuments = async () => {
       try {
-        // Obtener todos los documentos requeridos del localStorage
-        const allDocuments = JSON.parse(localStorage.getItem("requiredDocuments") || "[]");
+        // Importar las funciones de Firebase
+        const { db } = await import('@/app/firebaseConfig')
+        const { collection, query, where, getDocs } = await import('firebase/firestore')
         
-        // Filtrar solo los documentos de la compañía seleccionada
-        const companyDocuments = allDocuments.filter(
-          (doc: RequiredDocument) => doc.companyId === selectedCompanyId
-        );
+        console.log("Cargando documentos requeridos para la empresa:", selectedCompanyId)
         
-        console.log(`Found ${companyDocuments.length} required documents for company ${selectedCompanyId}`);
-        return companyDocuments;
+        // Consultar documentos de Firestore filtrados por companyId
+        const requiredDocsRef = collection(db, "requiredDocuments")
+        const q = query(requiredDocsRef, where("companyId", "==", selectedCompanyId))
+        const querySnapshot = await getDocs(q)
+        
+        // Convertir los documentos de Firestore al formato RequiredDocument
+        const docs = querySnapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data(),
+        })) as RequiredDocument[]
+        
+        console.log(`Encontrados ${docs.length} documentos requeridos para la empresa ${selectedCompanyId}`);
+        return docs;
       } catch (error) {
-        console.error("Error loading required documents:", error);
-        return [];
+        console.error("Error cargando documentos desde Firestore:", error);
+        
+        // Fallback a localStorage si hay un error
+        try {
+          const allDocuments = JSON.parse(localStorage.getItem("requiredDocuments") || "[]");
+          const companyDocuments = allDocuments.filter(
+            (doc: RequiredDocument) => doc.companyId === selectedCompanyId
+          );
+          console.log(`Documentos cargados desde localStorage: ${companyDocuments.length}`);
+          return companyDocuments;
+        } catch (localError) {
+          console.error("Error cargando desde localStorage:", localError);
+          return [];
+        }
       }
     };
     
-    setRequiredDocuments(loadRequiredDocuments());
+    // Cargar los documentos y actualizar el estado
+    loadRequiredDocuments().then(documents => {
+      setRequiredDocuments(documents);
+    });
   }, [selectedCompanyId]);
 
   return (

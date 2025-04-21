@@ -4,7 +4,8 @@ import { DashboardLayout } from "@/components/dashboard-layout"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { toast } from "@/components/ui/use-toast"
-import { Building, Copy, Plus, Users } from "lucide-react"
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog"
+import { Building, Copy, Plus, Users, Trash2 } from "lucide-react"
 import Link from "next/link"
 import { useEffect, useState } from "react"
 
@@ -21,60 +22,178 @@ interface Company {
 export default function CompaniesPage() {
   const [companies, setCompanies] = useState<Company[]>([])
   const [loading, setLoading] = useState(true)
+  const [openDeleteDialog, setOpenDeleteDialog] = useState(false)
+  const [companyToDelete, setCompanyToDelete] = useState<string | null>(null)
 
   useEffect(() => {
-    // In a real app, this would be an API call
-    const loadCompanies = () => {
+    // Cargar empresas desde Firestore
+    const loadCompanies = async () => {
       try {
-        const currentUser = JSON.parse(localStorage.getItem("currentUser") || "{}")
-        if (!currentUser || !currentUser.id) {
-          return []
+        setLoading(true)
+        
+        // Obtener el usuario actual - intentar con ambas claves posibles
+        let storedUser = localStorage.getItem("currentUser")
+        
+        // Si no existe, intentar con la versión en español
+        if (!storedUser) {
+          storedUser = localStorage.getItem("usuarioActual")
         }
-
-        const allCompanies = JSON.parse(localStorage.getItem("companies") || "[]")
-        return allCompanies.filter((company: Company) => company.adminId === currentUser.id)
+        
+        if (!storedUser) {
+          console.warn("No se encontró información del usuario en localStorage")
+          setCompanies([])
+          setLoading(false)
+          return
+        }
+        
+        const currentUser = JSON.parse(storedUser)
+        if (!currentUser || !currentUser.id) {
+          console.warn("Información de usuario incompleta", currentUser)
+          setCompanies([])
+          setLoading(false)
+          return
+        }
+        
+        // Importar la función de Firebase
+        const { getAdminCompanies } = await import('@/app/firebaseConfig')
+        
+        // Obtener las empresas del administrador desde Firestore
+        const companiesData = await getAdminCompanies(currentUser.id)
+        
+        // Actualizar el estado
+        setCompanies(companiesData)
       } catch (error) {
-        console.error("Error loading companies:", error)
-        return []
+        console.error("Error loading companies from Firestore:", error)
+        toast({
+          title: "Error",
+          description: "No se pudieron cargar las empresas. Por favor, intenta de nuevo.",
+          variant: "destructive",
+        })
+        setCompanies([])
+      } finally {
+        setLoading(false)
       }
     }
 
-    setCompanies(loadCompanies())
-    setLoading(false)
+    loadCompanies()
   }, [])
 
-  function generateInviteLink(companyId: string) {
-    const currentUser = JSON.parse(localStorage.getItem("currentUser") || "{}")
-    if (!currentUser || !currentUser.id) {
+  async function generateInviteLink(companyId: string) {
+    try {
+      // Obtener el usuario actual - intentar con ambas claves posibles
+      let storedUser = localStorage.getItem("currentUser")
+      
+      // Si no existe, intentar con la versión en español
+      if (!storedUser) {
+        storedUser = localStorage.getItem("usuarioActual")
+      }
+      
+      if (!storedUser) {
+        toast({
+          title: "Error",
+          description: "No se pudo generar el enlace de invitación. Por favor, inicia sesión nuevamente.",
+          variant: "destructive",
+        })
+        return
+      }
+      
+      const currentUser = JSON.parse(storedUser)
+      if (!currentUser || !currentUser.id) {
+        toast({
+          title: "Error",
+          description: "Información de usuario incompleta. Por favor, inicia sesión nuevamente.",
+          variant: "destructive",
+        })
+        return
+      }
+
+      // Buscar la compañía en Firestore
+      const { db } = await import('@/app/firebaseConfig')
+      const { doc, getDoc } = await import('firebase/firestore')
+      
+      // Obtener el documento de la compañía
+      const companyRef = doc(db, "companies", companyId)
+      const companySnap = await getDoc(companyRef)
+      
+      if (!companySnap.exists()) {
+        // Intentar buscar en localStorage como fallback
+        const companies = JSON.parse(localStorage.getItem("companies") || "[]")
+        const company = companies.find((c: Company) => c.id === companyId)
+        
+        if (!company) {
+          toast({
+            title: "Error",
+            description: "No se encontró la información de la empresa.",
+            variant: "destructive",
+          })
+          return
+        }
+        
+        // Generar URL con los datos de localStorage
+        const inviteUrl = `${window.location.origin}/register/employee?companyId=${companyId}&adminId=${currentUser.id}&companyName=${encodeURIComponent(company.name)}&companyColor=${encodeURIComponent(company.color)}`
+        navigator.clipboard.writeText(inviteUrl)
+      } else {
+        // Obtener los datos de la compañía desde Firestore
+        const companyData = companySnap.data()
+        
+        // Generar URL con los datos de Firestore
+        const inviteUrl = `${window.location.origin}/register/employee?companyId=${companyId}&adminId=${currentUser.id}&companyName=${encodeURIComponent(companyData.name)}&companyColor=${encodeURIComponent(companyData.color)}`
+        navigator.clipboard.writeText(inviteUrl)
+      }
+
+      toast({
+        title: "Copiado al portapapeles",
+        description: "El enlace de invitación ha sido copiado al portapapeles.",
+      })
+    } catch (error) {
+      console.error("Error generating invitation link:", error)
       toast({
         title: "Error",
-        description: "Could not generate invitation link. Please try again.",
+        description: "No se pudo generar el enlace de invitación. Por favor, intenta de nuevo.",
         variant: "destructive",
       })
-      return
     }
-
-    // Buscar la compañía para obtener su nombre y color
-    const companies = JSON.parse(localStorage.getItem("companies") || "[]")
-    const company = companies.find((c: Company) => c.id === companyId)
+  }
+  
+  async function handleDeleteCompany() {
+    if (!companyToDelete) return;
     
-    if (!company) {
+    try {
+      setLoading(true);
+      
+      // Importar la función de Firebase
+      const { deleteCompany } = await import('@/app/firebaseConfig');
+      
+      // Eliminar la compañía
+      const success = await deleteCompany(companyToDelete);
+      
+      if (success) {
+        // Actualizar la lista de compañías
+        setCompanies(companies.filter(company => company.id !== companyToDelete));
+        
+        toast({
+          title: "Company deleted",
+          description: "The company has been successfully deleted.",
+        });
+      } else {
+        toast({
+          title: "Error",
+          description: "Could not delete the company. Please try again.",
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      console.error("Error deleting company:", error);
       toast({
         title: "Error",
-        description: "Company information not found.",
+        description: "An unexpected error occurred. Please try again.",
         variant: "destructive",
-      })
-      return
+      });
+    } finally {
+      setLoading(false);
+      setOpenDeleteDialog(false);
+      setCompanyToDelete(null);
     }
-
-    // Generar URL con todos los parámetros necesarios
-    const inviteUrl = `${window.location.origin}/register/employee?companyId=${companyId}&adminId=${currentUser.id}&companyName=${encodeURIComponent(company.name)}&companyColor=${encodeURIComponent(company.color)}`
-    navigator.clipboard.writeText(inviteUrl)
-
-    toast({
-      title: "Copied to clipboard",
-      description: "The invitation link has been copied to your clipboard.",
-    })
   }
 
   return (
@@ -124,16 +243,47 @@ export default function CompaniesPage() {
                   <span className="font-medium">Created:</span> {new Date(company.createdAt).toLocaleDateString()}
                 </div>
               </CardContent>
-              <CardFooter>
+              <CardFooter className="flex flex-col gap-2">
                 <Button variant="outline" className="w-full" onClick={() => generateInviteLink(company.id)}>
                   <Copy className="mr-2 h-4 w-4" />
                   Copy Invitation Link
+                </Button>
+                <Button variant="outline" className="w-full" onClick={() => {
+                  setCompanyToDelete(company.id);
+                  setOpenDeleteDialog(true);
+                }}>
+                  <Trash2 className="mr-2 h-4 w-4 text-destructive" />
+                  <span className="text-destructive">Delete Company</span>
                 </Button>
               </CardFooter>
             </Card>
           ))}
         </div>
       )}
+      
+      <AlertDialog open={openDeleteDialog} onOpenChange={setOpenDeleteDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Estás seguro de que quieres eliminar esta compañía?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Esta acción no se puede deshacer. Se eliminarán todos los datos asociados a esta compañía, incluyendo los documentos requeridos.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={loading}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction 
+              onClick={(e) => {
+                e.preventDefault();
+                handleDeleteCompany();
+              }}
+              disabled={loading}
+              className="bg-destructive hover:bg-destructive/90"
+            >
+              {loading ? "Eliminando..." : "Eliminar"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </DashboardLayout>
   )
 }

@@ -40,64 +40,96 @@ export default function NewCompanyPage() {
     try {
       setIsLoading(true)
 
-      // In a real app, this would call your API to create the company
-      console.log("Creating company:", values)
-
-      // Simulate API call
-      await new Promise((resolve) => setTimeout(resolve, 1000))
-
-      // Get current user from localStorage
-      const storedUser = localStorage.getItem("currentUser")
+      // Obtener el usuario actual desde localStorage
+      // Intentar con ambas claves posibles para mayor compatibilidad
+      let storedUser = localStorage.getItem("currentUser")
+      
+      // Si no existe, intentar con la versión en español
       if (!storedUser) {
-        throw new Error("User not found")
+        storedUser = localStorage.getItem("usuarioActual")
+      }
+      
+      if (!storedUser) {
+        toast({
+          title: "Error",
+          description: "No se pudo encontrar la información del usuario. Por favor, inicia sesión nuevamente.",
+          variant: "destructive",
+        })
+        router.push("/login")
+        return
       }
 
       const user = JSON.parse(storedUser)
+      
+      // Importar las funciones de Firebase
+      const { createCompany, db } = await import('@/app/firebaseConfig')
+      const { doc, updateDoc, arrayUnion } = await import('firebase/firestore')
 
-      // Create a new company
-      const company = {
-        id: `company_${Date.now()}`,
+      console.log("Creando empresa:", values)
+
+      // Crear datos de la empresa
+      const companyData = {
         name: values.name,
         description: values.description || "",
         color: values.color,
         adminId: user.id,
-        createdAt: new Date(),
         users: [],
       }
 
-      // Store company in localStorage
-      const companies = JSON.parse(localStorage.getItem("companies") || "[]")
-      companies.push(company)
-      localStorage.setItem("companies", JSON.stringify(companies))
-
-      // Store companies in users array too
-      const users = JSON.parse(localStorage.getItem("users") || "[]")
-      const currentUserIndex = users.findIndex((u: any) => u.id === user.id)
+      // Crear la empresa en Firestore
+      const company = await createCompany(companyData)
+      console.log("Empresa creada en Firestore:", company)
       
-      if (currentUserIndex >= 0) {
-        if (!users[currentUserIndex].companies) {
-          users[currentUserIndex].companies = []
+      // Actualizar el usuario en Firestore para añadir la empresa
+      try {
+        const userDocRef = doc(db, "users", user.id)
+        await updateDoc(userDocRef, {
+          companies: arrayUnion({ companyId: company.id })
+        })
+        console.log("Usuario actualizado en Firestore")
+      } catch (userUpdateError) {
+        console.error("Error al actualizar el usuario en Firestore:", userUpdateError)
+      }
+
+      // Actualizar el usuario en localStorage para compatibilidad
+      try {
+        if (!user.companies) {
+          user.companies = []
         }
-        users[currentUserIndex].companies.push({ companyId: company.id })
-        localStorage.setItem("users", JSON.stringify(users))
+        user.companies.push({ companyId: company.id })
+        localStorage.setItem("currentUser", JSON.stringify(user))
+        
+        // Actualizar la lista de empresas en localStorage
+        const companies = JSON.parse(localStorage.getItem("companies") || "[]")
+        companies.push(company)
+        localStorage.setItem("companies", JSON.stringify(companies))
+        
+        // Actualizar el usuario en la lista de usuarios
+        const users = JSON.parse(localStorage.getItem("users") || "[]")
+        const currentUserIndex = users.findIndex((u: any) => u.id === user.id)
+        
+        if (currentUserIndex >= 0) {
+          if (!users[currentUserIndex].companies) {
+            users[currentUserIndex].companies = []
+          }
+          users[currentUserIndex].companies.push({ companyId: company.id })
+          localStorage.setItem("users", JSON.stringify(users))
+        }
+      } catch (localStorageError) {
+        console.error("Error al actualizar localStorage:", localStorageError)
       }
 
-      // Update current user
-      if (!user.companies) {
-        user.companies = []
-      }
-      user.companies.push({ companyId: company.id })
-      localStorage.setItem("currentUser", JSON.stringify(user))
-
-      // Generate invitation link with company data embedded in URL
-      // This makes it work across browsers and incognito mode
+      // Generar enlace de invitación con los datos de la empresa
       const inviteUrl = `${window.location.origin}/register/employee?companyId=${company.id}&adminId=${user.id}&companyName=${encodeURIComponent(company.name)}&companyColor=${encodeURIComponent(company.color)}`
       setInviteLink(inviteUrl)
 
       toast({
-        title: "Company created",
-        description: "Your company has been created successfully.",
+        title: "Empresa creada",
+        description: "Tu empresa ha sido creada exitosamente. Ahora puedes definir los documentos requeridos.",
       })
+      
+      // Redirigir al administrador a la página de creación de documentos requeridos
+      router.push(`/admin/documents/new?companyId=${company.id}`)
     } catch (error) {
       console.error("Company creation error:", error)
       toast({
@@ -193,15 +225,15 @@ export default function NewCompanyPage() {
 
                 <Button type="submit" disabled={isLoading}>
                   {isLoading ? (
-                    <>
+                    <div className="flex items-center">
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Creating...
-                    </>
+                      <span>Creating...</span>
+                    </div>
                   ) : (
-                    <>
+                    <div className="flex items-center">
                       <Building className="mr-2 h-4 w-4" />
-                      Create Company
-                    </>
+                      <span>Create Company</span>
+                    </div>
                   )}
                 </Button>
               </form>

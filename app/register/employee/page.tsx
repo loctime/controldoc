@@ -108,72 +108,93 @@ export default function EmployeeRegisterPage() {
     try {
       setIsLoading(true)
 
-      // In a real app, this would call your authentication API to register the user
+      // Importar las funciones de Firebase
+      const { signUp, db } = await import('@/app/firebaseConfig');
+      const { doc, setDoc, getDoc, updateDoc, arrayUnion } = await import('firebase/firestore');
+      
       console.log("Registering employee account:", values)
   
-      // Simulate API call
-      await new Promise((resolve) => setTimeout(resolve, 1000))
-  
-      // Check if user already exists
-      const users = JSON.parse(localStorage.getItem("users") || "[]")
-      let user = users.find((u: any) => u.email === values.email)
-  
-      if (!user) {
-        // Create new user
-        user = {
-          id: `employee_${Date.now()}`,
+      // Registrar usuario con Firebase Auth
+      const userCredential = await signUp({
+        email: values.email,
+        password: values.password
+      });
+      
+      if (!userCredential) {
+        throw new Error("No se pudo crear la cuenta");
+      }
+      
+      // Obtener el usuario de Firebase
+      const firebaseUser = userCredential.user;
+      const userId = firebaseUser.uid;
+      
+      // Verificar si el usuario ya existe en Firestore
+      const userDocRef = doc(db, "users", userId);
+      const userDocSnap = await getDoc(userDocRef);
+      
+      if (!userDocSnap.exists()) {
+        // Crear nuevo usuario en Firestore
+        await setDoc(userDocRef, {
           name: values.name,
           email: values.email,
-          password: values.password, // En una app real, esto debería estar hasheado
           role: "employee",
           companies: [{ companyId, adminId }],
-          createdAt: new Date(),
-        }
-        users.push(user)
+          createdAt: new Date().toISOString()
+        });
       } else {
-        // Asegurarse de que el usuario tiene un array de companies
-        if (!user.companies) {
-          user.companies = []
-        }
-        
-        // Add company to existing user
-        if (!user.companies.some((c: any) => c.companyId === companyId)) {
-          user.companies.push({ companyId, adminId })
-        }
+        // Actualizar usuario existente para añadir la nueva compañía
+        await updateDoc(userDocRef, {
+          companies: arrayUnion({ companyId, adminId })
+        });
       }
-  
-      localStorage.setItem("users", JSON.stringify(users))
-      localStorage.setItem("currentUser", JSON.stringify(user))
-  
-      // Update company users
-      const companies = JSON.parse(localStorage.getItem("companies") || "[]")
-      const companyIndex = companies.findIndex((c: any) => c.id === companyId)
-  
-      if (companyIndex !== -1) {
-        // Asegurarse de que la compañía tiene un array de users
-        if (!companies[companyIndex].users) {
-          companies[companyIndex].users = []
+      
+      // Obtener los datos actualizados del usuario
+      const updatedUserSnap = await getDoc(userDocRef);
+      const userData = updatedUserSnap.data();
+      
+      // Guardar en localStorage para compatibilidad
+      try {
+        const user = {
+          id: userId,
+          ...userData,
+          role: userData?.role || "employee"
+        };
+        
+        localStorage.setItem("currentUser", JSON.stringify(user));
+        
+        // Actualizar la lista de usuarios en localStorage
+        const users = JSON.parse(localStorage.getItem("users") || "[]");
+        const existingUserIndex = users.findIndex((u: any) => u.email === values.email);
+        
+        if (existingUserIndex >= 0) {
+          users[existingUserIndex] = user;
+        } else {
+          users.push(user);
         }
         
-        if (!companies[companyIndex].users.includes(user.id)) {
-          companies[companyIndex].users.push(user.id)
-          localStorage.setItem("companies", JSON.stringify(companies))
-        }
-      } else {
-        console.error("Company not found:", companyId)
-        // Si la compañía no existe, podríamos crearla con la información del URL
-        if (companyName && companyColor) {
-          const newCompany = {
-            id: companyId,
-            name: companyName,
-            color: companyColor,
-            adminId: adminId,
-            createdAt: new Date(),
-            users: [user.id],
-          }
-          companies.push(newCompany)
-          localStorage.setItem("companies", JSON.stringify(companies))
-        }
+        localStorage.setItem("users", JSON.stringify(users));
+      } catch (storageError) {
+        console.error("Error saving to localStorage:", storageError);
+      }
+      
+      // Actualizar la compañía en Firestore para añadir el usuario
+      const companyDocRef = doc(db, "companies", companyId);
+      const companyDocSnap = await getDoc(companyDocRef);
+      
+      if (companyDocSnap.exists()) {
+        // Añadir el usuario a la compañía existente
+        await updateDoc(companyDocRef, {
+          users: arrayUnion(userId)
+        });
+      } else if (companyName && companyColor) {
+        // Crear la compañía si no existe
+        await setDoc(companyDocRef, {
+          name: companyName,
+          color: companyColor,
+          adminId: adminId,
+          createdAt: new Date().toISOString(),
+          users: [userId]
+        });
       }
   
       toast({

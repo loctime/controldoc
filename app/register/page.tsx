@@ -48,30 +48,40 @@ export default function RegisterPage() {
     try {
       setIsLoading(true)
 
-      // In a real app, this would call your authentication API to register the user
-      console.log("Registering admin account:", values)
+      // Importar las funciones de Firebase
+      const { signUp, db, ADMIN_ROLE } = await import('@/app/firebaseConfig');
+      const { doc, setDoc } = await import('firebase/firestore');
 
-      // Simulate API call
-      await new Promise((resolve) => setTimeout(resolve, 1000))
+      console.log("Registering admin account:", values);
 
-      // For demo purposes, we'll store the user in localStorage
-      const user = {
-        id: `admin_${Date.now()}`,
-        name: values.name,
+      // Registrar usuario con Firebase Auth
+      const userCredential = await signUp({
         email: values.email,
-        role: "admin",
-        companies: [],
-        createdAt: new Date(),
+        password: values.password
+      });
+
+      if (!userCredential) {
+        throw new Error("No se pudo crear la cuenta");
       }
 
-      localStorage.setItem("currentUser", JSON.stringify(user))
+      // Obtener el usuario de Firebase
+      const firebaseUser = userCredential.user;
+      
+      // Crear documento del usuario en Firestore con rol de administrador
+      await setDoc(doc(db, "users", firebaseUser.uid), {
+        name: values.name,
+        email: values.email,
+        role: ADMIN_ROLE, // Usar el rol de administrador definido en firebaseConfig
+        companies: [],
+        createdAt: new Date().toISOString()
+      });
 
       toast({
-        title: "Registration successful",
-        description: "Your admin account has been created.",
-      })
+        title: "Registro exitoso",
+        description: "Tu cuenta de administrador ha sido creada.",
+      });
 
-      // Redirect to the admin dashboard
+      // Redireccionar al panel de administrador
       router.push("/admin")
     } catch (error) {
       console.error("Registration error:", error)

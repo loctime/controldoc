@@ -76,19 +76,19 @@
 }
 
 .status-pending {
-  @apply bg-matte-yellow text-black;
+  @apply bg-yellow-200 text-black;
 }
 
 .status-approved {
-  @apply bg-matte-green text-white;
+  @apply bg-green-600 text-white;
 }
 
 .status-rejected {
-  @apply bg-matte-red text-white;
+  @apply bg-red-600 text-white;
 }
 
 .status-expired {
-  @apply bg-matte-gray text-white;
+  @apply bg-gray-500 text-white;
 }
 
 .file-card {

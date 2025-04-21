@@ -8,6 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { FileText, Upload } from "lucide-react"
 import Link from "next/link"
 import { useEffect, useState } from "react"
+import { useSelectedCompany } from "@/contexts/selected-company-context"
 
 interface RequiredDocument {
   id: string
@@ -25,28 +26,62 @@ interface RequiredDocument {
   exampleFileUrl?: string
 }
 
-export default function EmployeeDocumentsPage({ selectedCompanyId }: { selectedCompanyId: string | null }) {
+export default function EmployeeDocumentsPage() {
+  const { selectedCompanyId } = useSelectedCompany()
   const [documents, setDocuments] = useState<RequiredDocument[]>([])
   const [loading, setLoading] = useState(true)
   const [previewDocument, setPreviewDocument] = useState<RequiredDocument | null>(null)
 
   useEffect(() => {
-    // Load documents from localStorage
-    const loadDocuments = () => {
+    // Cargar documentos requeridos desde Firestore
+    const loadDocuments = async () => {
+      if (!selectedCompanyId) {
+        setDocuments([])
+        setLoading(false)
+        return
+      }
+      
       try {
-        const allDocuments = JSON.parse(localStorage.getItem("documents") || "[]")
-        if (selectedCompanyId) {
-          return allDocuments.filter((doc: RequiredDocument) => doc.companyId === selectedCompanyId)
-        }
-        return []
+        setLoading(true)
+        
+        // Importar las funciones de Firebase
+        const { db } = await import('@/app/firebaseConfig')
+        const { collection, query, where, getDocs } = await import('firebase/firestore')
+        
+        console.log("Cargando documentos requeridos para la empresa:", selectedCompanyId)
+        
+        // Consultar documentos de Firestore filtrados por companyId
+        const requiredDocsRef = collection(db, "requiredDocuments")
+        const q = query(requiredDocsRef, where("companyId", "==", selectedCompanyId))
+        const querySnapshot = await getDocs(q)
+        
+        // Convertir los documentos de Firestore al formato RequiredDocument
+        const docs = querySnapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data(),
+        })) as RequiredDocument[]
+        
+        console.log("Documentos requeridos encontrados:", docs.length)
+        setDocuments(docs)
       } catch (error) {
-        console.error("Error loading documents:", error)
-        return []
+        console.error("Error cargando documentos desde Firestore:", error)
+        
+        // Fallback a localStorage si hay un error
+        try {
+          const allDocuments = JSON.parse(localStorage.getItem("requiredDocuments") || "[]")
+          const filteredDocs = allDocuments.filter((doc: RequiredDocument) => doc.companyId === selectedCompanyId)
+          console.log("Documentos cargados desde localStorage:", filteredDocs.length)
+          setDocuments(filteredDocs)
+        } catch (localError) {
+          console.error("Error cargando desde localStorage:", localError)
+          setDocuments([])
+        }
+      } finally {
+        setLoading(false)
       }
     }
 
-    setDocuments(loadDocuments())
-    setLoading(false)
+    loadDocuments()
   }, [selectedCompanyId])
 
   function formatDeadline(document: RequiredDocument) {
